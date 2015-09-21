@@ -1,6 +1,6 @@
 #include "Adafruit_Sensor.h"
 #include "Adafruit_BME280.h"
-#include "SparkFun-Spark-Phant.h"
+#include "SparkFunPhant.h"
 #include "elapsedMillis.h"
 
 #define SEALEVELPRESSURE_HPA (1013.25)
@@ -54,8 +54,13 @@ void loop() {
     }
 
     if (lastPost > POST_RATE || sensorStatus == 2) {
-      if (postToPhant(sensorStatus) > 0) { // publish to phant
-        lastPost = 0;
+      while (postToPhant(sensorStatus) <= 0) { // publish to phant
+        Serial.println("Phant post failed. Trying again.");
+				// Delay 1s, so we don't flood the server. Little delay's allow the Photon time
+				// to communicate with the Cloud.
+        for (int i=0; i<1000; i++) {
+              delay(1);
+        }
       }
     }
 }
@@ -70,42 +75,11 @@ int postToParticle(int status) {
 int postToPhant(int status) {
   // add variables
   phant.add("status", status);
-  phant.add("temp", temperature);
-  phant.add("pressure", pressure);
-  phant.add("humidity", humidity);
+  phant.add("temp", temperature, 2);
+  phant.add("pressure", pressure, 2);
+  phant.add("humidity", humidity, 2);
 
-  // post data
-  TCPClient client;
-  char response[512];
-  int i = 0;
-  int retVal = 0;
-
-  if (client.connect(server, 80)) {
-      Serial.println("Posting!");
-
-      client.print(phant.post());
-      delay(1000);
-      while (client.available())      {
-          char c = client.read();
-          if (i < 512) {
-              response[i++] = c;
-            }
-      }
-      if (strstr(response, "200 OK"))      {
-          Serial.println("Post success!");
-          retVal = 1;
-      } else if (strstr(response, "400 Bad Request")) {
-          Serial.println("Bad request");
-          retVal = -1;
-      } else {
-          retVal = -2;
-      }
-  } else {
-      Serial.println("connection failed");
-      retVal = -3;
-  }
-  client.stop();
-  return retVal;
+  return phant.particlePost();
 }
 
 int readSensorData() {
