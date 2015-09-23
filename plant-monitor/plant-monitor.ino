@@ -62,12 +62,13 @@ void loop() {
               delay(1);
         }
       }
+      lastPost = 0;
     }
 }
 
 int postToParticle(int status) {
   char publishString[128];
-  sprintf(publishString,"{\"status\": \"%d\", \"temp\": \"%0.2f\", \"pressure\": %0.2f, \"humidity\": %0.2f}",status, temperature, pressure, humidity);
+  sprintf(publishString,"{\"status\": %d, \"temp\": %0.2f, \"pressure\": %0.2f, \"humidity\": %0.2f}",status, temperature, pressure, humidity);
   Particle.publish("sensor",publishString);
   return 1;
 }
