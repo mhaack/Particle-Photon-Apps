@@ -15,6 +15,11 @@ double pressure = 0;
 double altitude = 0;
 double humidity = 0;
 
+// moisture sensor
+const int soilPower = D4;
+const int soilSensor1 = A0;
+int soil1 = 0;
+
 // SparkFun phant library
 const char server[] = "data.sparkfun.com";
 const char publicKey[] = "2JLLbmQoYEsKVxjrQV3a";
@@ -30,6 +35,10 @@ elapsedMillis lastPost;
 void setup()
 {
   pinMode(led, OUTPUT);
+  pinMode(soilSensor1,INPUT);
+  pinMode(soilPower, OUTPUT);
+  digitalWrite(soilPower, LOW);
+
   Serial.begin(9600);
 
   if (!bme.begin()) {
@@ -37,9 +46,11 @@ void setup()
     while (1);
   }
 
+  // declare Particle cloud variables
   Particle.variable("temperature", &temperature, DOUBLE);
   Particle.variable("pressure", &pressure, DOUBLE);
   Particle.variable("humidity", &humidity, DOUBLE);
+  Particle.variable("soil1", &soil1, INT);
 }
 
 void loop() {
@@ -47,13 +58,14 @@ void loop() {
     if (lastMeasurement > MEASUREMENT_RATE) {
       // read sensor data
       sensorStatus = readSensorData();
-      if (sensorStatus > 0) {
+      if (sensorStatus >= 0) {
           lastMeasurement = 0;
           postToParticle(sensorStatus); // always publish event
+          dumpSerial();
       }
     }
 
-    if (lastPost > POST_RATE || sensorStatus == 2) {
+    if (lastPost > POST_RATE || sensorStatus > 1) {
       while (postToPhant(sensorStatus) <= 0) { // publish to phant
         Serial.println("Phant post failed. Trying again.");
 				// Delay 1s, so we don't flood the server. Little delay's allow the Photon time
@@ -68,7 +80,7 @@ void loop() {
 
 int postToParticle(int status) {
   char publishString[128];
-  sprintf(publishString,"{\"status\": %d, \"temp\": %0.2f, \"pressure\": %0.2f, \"humidity\": %0.2f}",status, temperature, pressure, humidity);
+  sprintf(publishString,"{\"status\": %d, \"temp\": %0.2f, \"pressure\": %0.2f, \"humidity\": %0.2f, , \"soil1\": %u}", status, temperature, pressure, humidity, soil1);
   Particle.publish("sensor",publishString);
   return 1;
 }
@@ -79,23 +91,62 @@ int postToPhant(int status) {
   phant.add("temp", temperature, 2);
   phant.add("pressure", pressure, 2);
   phant.add("humidity", humidity, 2);
+  phant.add("soil1", soil1);
 
   return phant.particlePost();
 }
 
-int readSensorData() {
+
+byte readSensorData() {
+  byte status = readBMESensor();
+
+  soil1 = readSoilSensor(soilSensor1);
+
+  // todo define thresholds for dry, wet, max increase/decrease
+  // todo integrate the soil sensor value into status
+  return status;
+}
+
+// read BME280 sensor data
+byte readBMESensor() {
   double currentTemperature = 0;
   digitalWrite(led, HIGH);
-
   currentTemperature = bme.readTemperature();
   pressure = bme.readPressure() / 100.0F;
   altitude = bme.readAltitude(SEALEVELPRESSURE_HPA);
   humidity = bme.readHumidity();
-  delay(100);
+  delay(200);
   digitalWrite(led, LOW);
 
+  // calc temp diff for changes at .x level
+  int tempDiff = (currentTemperature - temperature)*10;
+  temperature = currentTemperature;
+
+  if (tempDiff > 0) {
+    return 1; // indicate temp increase above threshold
+  } else if (tempDiff < 0){
+    return 2; // indicate temp decrease above threshold
+  } else {
+    return 0; // indicate normal reading
+  }
+}
+
+// read soil sensor data
+int readSoilSensor(int soilSensor) {
+    unsigned int val = 0;
+    digitalWrite(led, HIGH);
+    digitalWrite(soilPower, HIGH); //turn sensor power on
+    delay(10);
+    val = analogRead(soilSensor);
+    digitalWrite(soilPower, LOW); //turn sensor power off
+    delay(190);
+    digitalWrite(led, LOW);
+    return val;
+}
+
+void dumpSerial() {
   Serial.print("Temperature = ");
-  Serial.print(currentTemperature);
+  Serial.print(temperature);
   Serial.println(" *C");
 
   Serial.print("Pressure = ");
@@ -110,14 +161,6 @@ int readSensorData() {
   Serial.print(humidity);
   Serial.println(" %");
 
-  // fload abs (std::abs) requiere #include <cmath>
-  //double tempDiff = std::abs (currentTemperature - temperature);
-  int tempDiff = abs ((currentTemperature - temperature)*10);
-  temperature = currentTemperature;
-
-  if (tempDiff < 1) {
-    return 1;
-  } else {
-    return 2;
-  }
+  Serial.print("Soil 1 = ");
+  Serial.println(soil1);
 }
