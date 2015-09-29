@@ -90,7 +90,7 @@ void loop() {
 
 int postToParticle(int status) {
   char publishString[128];
-  sprintf(publishString,"{\"status\": %d, \"temp\": %0.2f, \"pressure\": %0.2f, \"humidity\": %0.2f, , \"soil1\": %u}", status, temperature, pressure, humidity, soil1);
+  sprintf(publishString,"{\"status\": %d, \"temp\": %0.2f, \"pressure\": %0.2f, \"humidity\": %0.2f, \"soil1\": %u}", status, temperature, pressure, humidity, soil1);
   Particle.publish("sensor",publishString);
   return 1;
 }
