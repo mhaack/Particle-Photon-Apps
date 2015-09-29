@@ -29,7 +29,7 @@ const char privateKey[] = "GPxxAGzknDsN4AlwP4vj";
 Phant phant(server, publicKey, privateKey);
 
 // interval counters for measurement and post
-const int MEASUREMENT_RATE = 15000; // read sensor data every 30 sec
+const int MEASUREMENT_RATE = 30000; // read sensor data every 30 sec
 const int POST_RATE = 15 * 60000; // post data every 15 minutes
 elapsedMillis lastMeasurement;
 elapsedMillis lastPost;
@@ -61,8 +61,8 @@ void loop() {
     // read sensor data
     if (lastMeasurement > MEASUREMENT_RATE) {
       int bmeSensorStatus = readBMESensor();
-
-      int soil1SensorStatus = readSoilSensor1();
+      delay(200);
+      int soil1SensorStatus = readSoilSensor(soilSensor1, soil1);
 
       // calc overall sensor status
       sensorStatus = bmeSensorStatus; // TODO
@@ -107,7 +107,7 @@ int postToPhant(int status) {
 }
 
 // read BME280 sensor data
-byte readBMESensor() {
+int readBMESensor() {
   double currentTemperature = 0;
   digitalWrite(led, HIGH);
   currentTemperature = bme.readTemperature();
@@ -131,30 +131,26 @@ byte readBMESensor() {
 }
 
 // read soil sensor data
-byte readSoilSensor1() {
-  unsigned int currentSoil1 = readSoilSensor(soilSensor1);
-  int soilDiff = currentSoil1 - soil1;
-  soil1 = (currentSoil1 + soil1) / 2;
-
-  if (soilDiff > 100) {
-    return 1; // indicate soil increase above threshold
-  } else if (soilDiff < 100){
-    return 2; // indicate soil decrease above threshold
-  } else {
-    return 0; // indicate normal reading
-  }
-}
-
-int readSoilSensor(int soilSensor) {
-    unsigned int val = 0;
+int readSoilSensor(int soilSensor, unsigned int &soilValue) {
+    unsigned int currentSoil = 0;
     digitalWrite(led, HIGH);
     digitalWrite(soilPower, HIGH); //turn sensor power on
     delay(10);
-    val = analogRead(soilSensor);
+    currentSoil = analogRead(soilSensor);
     digitalWrite(soilPower, LOW); //turn sensor power off
     delay(190);
     digitalWrite(led, LOW);
-    return val;
+
+    int soilDiff = currentSoil - soilValue;
+    soilValue = (currentSoil + soilValue) / 2;
+
+    if (soilDiff > 100) {
+      return 1; // indicate soil increase above threshold
+    } else if (soilDiff < 100){
+      return 2; // indicate soil decrease above threshold
+    } else {
+      return 0; // indicate normal reading
+    }
 }
 
 void dumpSerial() {
