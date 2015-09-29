@@ -18,7 +18,9 @@ double humidity = 0;
 // moisture sensor
 const int soilPower = D4;
 const int soilSensor1 = A0;
-int soil1 = 0;
+const int soilSensor2 = A1;
+const int soilSensor3 = A2;
+unsigned int soil1 = 0;
 
 // SparkFun phant library
 const char server[] = "data.sparkfun.com";
@@ -27,7 +29,7 @@ const char privateKey[] = "GPxxAGzknDsN4AlwP4vj";
 Phant phant(server, publicKey, privateKey);
 
 // interval counters for measurement and post
-const int MEASUREMENT_RATE = 30000; // read sensor data every 30 sec
+const int MEASUREMENT_RATE = 15000; // read sensor data every 30 sec
 const int POST_RATE = 15 * 60000; // post data every 15 minutes
 elapsedMillis lastMeasurement;
 elapsedMillis lastPost;
@@ -54,10 +56,17 @@ void setup()
 }
 
 void loop() {
-    int sensorStatus = 1;
+    int sensorStatus = 0;
+
+    // read sensor data
     if (lastMeasurement > MEASUREMENT_RATE) {
-      // read sensor data
-      sensorStatus = readSensorData();
+      int bmeSensorStatus = readBMESensor();
+
+      int soil1SensorStatus = readSoilSensor1();
+
+      // calc overall sensor status
+      sensorStatus = bmeSensorStatus; // TODO
+
       if (sensorStatus >= 0) {
           lastMeasurement = 0;
           postToParticle(sensorStatus); // always publish event
@@ -65,7 +74,8 @@ void loop() {
       }
     }
 
-    if (lastPost > POST_RATE || sensorStatus > 1) {
+    // update cloud
+    if (lastPost > POST_RATE || sensorStatus > 0) {
       while (postToPhant(sensorStatus) <= 0) { // publish to phant
         Serial.println("Phant post failed. Trying again.");
 				// Delay 1s, so we don't flood the server. Little delay's allow the Photon time
@@ -96,17 +106,6 @@ int postToPhant(int status) {
   return phant.particlePost();
 }
 
-
-byte readSensorData() {
-  byte status = readBMESensor();
-
-  soil1 = readSoilSensor(soilSensor1);
-
-  // todo define thresholds for dry, wet, max increase/decrease
-  // todo integrate the soil sensor value into status
-  return status;
-}
-
 // read BME280 sensor data
 byte readBMESensor() {
   double currentTemperature = 0;
@@ -132,6 +131,20 @@ byte readBMESensor() {
 }
 
 // read soil sensor data
+byte readSoilSensor1() {
+  unsigned int currentSoil1 = readSoilSensor(soilSensor1);
+  int soilDiff = currentSoil1 - soil1;
+  soil1 = (currentSoil1 + soil1) / 2;
+
+  if (soilDiff > 100) {
+    return 1; // indicate soil increase above threshold
+  } else if (soilDiff < 100){
+    return 2; // indicate soil decrease above threshold
+  } else {
+    return 0; // indicate normal reading
+  }
+}
+
 int readSoilSensor(int soilSensor) {
     unsigned int val = 0;
     digitalWrite(led, HIGH);
