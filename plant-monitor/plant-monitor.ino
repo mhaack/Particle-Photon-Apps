@@ -8,6 +8,9 @@
 // control led
 const int led = D7;
 
+// main status
+int lastSensorStatus = 0, currentSensorStatus = 0;
+
 // BME280 sensor
 Adafruit_BME280 bme;
 double temperature = 0;
@@ -16,11 +19,13 @@ double altitude = 0;
 double humidity = 0;
 
 // moisture sensor
+const int soildThresholdLow = 500;
+const int soildThresholdHigh = 3500;
 const int soilPower = D4;
 const int soilSensor1 = A0;
 const int soilSensor2 = A1;
 const int soilSensor3 = A2;
-unsigned int soil1 = 0;
+int soil1 = 2048, soil2 = 2048, soil3 = 2048;
 
 // SparkFun phant library
 const char server[] = "data.sparkfun.com";
@@ -29,15 +34,17 @@ const char privateKey[] = "GPxxAGzknDsN4AlwP4vj";
 Phant phant(server, publicKey, privateKey);
 
 // interval counters for measurement and post
-const int MEASUREMENT_RATE = 30000; // read sensor data every 30 sec
-const int POST_RATE = 15 * 60000; // post data every 15 minutes
+const unsigned int MEASUREMENT_RATE = 60000; // read sensor data every 60 sec
+const unsigned int POST_RATE = 15 * 60000; // post data every 15 minutes
 elapsedMillis lastMeasurement;
 elapsedMillis lastPost;
 
 void setup()
 {
   pinMode(led, OUTPUT);
-  pinMode(soilSensor1,INPUT);
+  pinMode(soilSensor1, INPUT);
+  pinMode(soilSensor2, INPUT);
+  pinMode(soilSensor3, INPUT);
   pinMode(soilPower, OUTPUT);
   digitalWrite(soilPower, LOW);
 
@@ -53,30 +60,35 @@ void setup()
   Particle.variable("pressure", &pressure, DOUBLE);
   Particle.variable("humidity", &humidity, DOUBLE);
   Particle.variable("soil1", &soil1, INT);
+  Particle.variable("soil2", &soil2, INT);
+  Particle.variable("soil3", &soil3, INT);
 }
 
 void loop() {
-    int sensorStatus = 0;
-
     // read sensor data
     if (lastMeasurement > MEASUREMENT_RATE) {
       int bmeSensorStatus = readBMESensor();
       delay(200);
       int soil1SensorStatus = readSoilSensor(soilSensor1, soil1);
+      delay(200);
+      int soil2SensorStatus = readSoilSensor(soilSensor2, soil2);
+      delay(200);
+      int soil3SensorStatus = readSoilSensor(soilSensor3, soil3);
 
       // calc overall sensor status
-      sensorStatus = bmeSensorStatus; // TODO
+      currentSensorStatus = (bmeSensorStatus << 6) + (soil1SensorStatus << 4) +
+        (soil2SensorStatus << 2) + soil3SensorStatus;
 
-      if (sensorStatus >= 0) {
+      if (currentSensorStatus >= 0) {
           lastMeasurement = 0;
-          postToParticle(sensorStatus); // always publish event
+          postToParticle();
           dumpSerial();
       }
     }
 
-    // update cloud
-    if (lastPost > POST_RATE || sensorStatus > 0) {
-      while (postToPhant(sensorStatus) <= 0) { // publish to phant
+    // update cloud on timer or sensor data changes
+    if (lastPost > POST_RATE || currentSensorStatus != lastSensorStatus) {
+      while (postToPhant() <= 0) { // publish to phant
         Serial.println("Phant post failed. Trying again.");
 				// Delay 1s, so we don't flood the server. Little delay's allow the Photon time
 				// to communicate with the Cloud.
@@ -86,23 +98,27 @@ void loop() {
       }
       lastPost = 0;
     }
+
+    lastSensorStatus = currentSensorStatus;
 }
 
-int postToParticle(int status) {
+int postToParticle() {
   char publishString[128];
-  sprintf(publishString,"{\"status\": %d, \"temp\": %0.2f, \"pressure\": %0.2f, \"humidity\": %0.2f, \"soil1\": %u}", status, temperature, pressure, humidity, soil1);
+  sprintf(publishString,"{\"status\": %d, \"temp\": %0.2f, \"pressure\": %0.2f, \"humidity\": %0.2f, \"soil1\": %u, \"soil2\": %u, \"soil3\": %u}",
+    currentSensorStatus, temperature, pressure, humidity, soil1, soil2, soil3);
   Particle.publish("sensor",publishString);
   return 1;
 }
 
-int postToPhant(int status) {
+int postToPhant() {
   // add variables
-  phant.add("status", status);
+  phant.add("status", currentSensorStatus);
   phant.add("temp", temperature, 2);
   phant.add("pressure", pressure, 2);
   phant.add("humidity", humidity, 2);
   phant.add("soil1", soil1);
-
+  phant.add("soil2", soil2);
+  phant.add("soil3", soil3);
   return phant.particlePost();
 }
 
@@ -131,26 +147,23 @@ int readBMESensor() {
 }
 
 // read soil sensor data
-int readSoilSensor(int soilSensor, unsigned int &soilValue) {
-    unsigned int currentSoil = 0;
+int readSoilSensor(int soilSensor, int &soilValue) {
     digitalWrite(led, HIGH);
     digitalWrite(soilPower, HIGH); //turn sensor power on
-    delay(10);
-    currentSoil = analogRead(soilSensor);
+    delay(10); // give some time to settle
+    soilValue = analogRead(soilSensor);
     digitalWrite(soilPower, LOW); //turn sensor power off
     delay(190);
     digitalWrite(led, LOW);
 
-    int soilDiff = currentSoil - soilValue;
-    soilValue = (currentSoil + soilValue) / 2;
-
-    if (soilDiff > 100) {
-      return 1; // indicate soil increase above threshold
-    } else if (soilDiff < 100){
-      return 2; // indicate soil decrease above threshold
+    if (soilValue < soildThresholdLow) {
+      return 1; // indicate soil is to low
+    } else if (soilValue > soildThresholdHigh) {
+      return 2; // indicate soil is to high
     } else {
       return 0; // indicate normal reading
     }
+    return 0;
 }
 
 void dumpSerial() {
@@ -172,4 +185,11 @@ void dumpSerial() {
 
   Serial.print("Soil 1 = ");
   Serial.println(soil1);
+
+  Serial.print("Soil 2 = ");
+  Serial.println(soil2);
+
+  Serial.print("Soil 3 = ");
+  Serial.println(soil3);
+
 }
