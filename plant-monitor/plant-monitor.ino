@@ -10,6 +10,7 @@ const int led = D7;
 
 // main status
 int lastSensorStatus = 0, currentSensorStatus = 0;
+char publishString[128];
 
 // BME280 sensor
 Adafruit_BME280 bme;
@@ -103,7 +104,6 @@ void loop() {
 }
 
 int postToParticle() {
-  char publishString[128];
   sprintf(publishString,"{\"status\": %d, \"temp\": %0.2f, \"pressure\": %0.2f, \"humidity\": %0.2f, \"soil1\": %u, \"soil2\": %u, \"soil3\": %u}",
     currentSensorStatus, temperature, pressure, humidity, soil1, soil2, soil3);
   Particle.publish("sensor",publishString);
@@ -191,5 +191,4 @@ void dumpSerial() {
 
   Serial.print("Soil 3 = ");
   Serial.println(soil3);
-
 }
