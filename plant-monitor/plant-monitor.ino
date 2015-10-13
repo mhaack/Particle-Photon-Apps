@@ -22,10 +22,11 @@ double humidity = 0;
 // moisture sensor
 const int soildThresholdLow = 500;
 const int soildThresholdHigh = 3500;
-const int soilPower = D4;
-const int soilSensor1 = A0;
-const int soilSensor2 = A1;
-const int soilSensor3 = A2;
+struct SoilSensor {
+  int sensor;
+  int power;
+};
+SoilSensor soilSensors[3] = {{ A0, D4 }, { A1, D5 }, { A2, D6 }};
 int soil1 = 2048, soil2 = 2048, soil3 = 2048;
 
 // SparkFun phant library
@@ -40,16 +41,14 @@ const unsigned int POST_RATE = 15 * 60000; // post data every 15 minutes
 elapsedMillis lastMeasurement;
 elapsedMillis lastPost;
 
-void setup()
-{
-  pinMode(led, OUTPUT);
-  pinMode(soilSensor1, INPUT);
-  pinMode(soilSensor2, INPUT);
-  pinMode(soilSensor3, INPUT);
-  pinMode(soilPower, OUTPUT);
-  digitalWrite(soilPower, LOW);
-
+void setup() {
   Serial.begin(9600);
+
+  pinMode(led, OUTPUT);
+  for (unsigned int i = 0; i < sizeof(soilSensors); i++) {
+    pinMode(soilSensors[i].sensor, INPUT);
+    pinMode(soilSensors[i].power, OUTPUT);
+  }
 
   if (!bme.begin()) {
     Serial.println("Could not find a valid BME280 sensor, check wiring!");
@@ -70,11 +69,11 @@ void loop() {
     if (lastMeasurement > MEASUREMENT_RATE) {
       int bmeSensorStatus = readBMESensor();
       delay(200);
-      int soil1SensorStatus = readSoilSensor(soilSensor1, soil1);
+      int soil1SensorStatus = readSoilSensor(soilSensors[0].sensor, soilSensors[0].power, soil1);
       delay(200);
-      int soil2SensorStatus = readSoilSensor(soilSensor2, soil2);
+      int soil2SensorStatus = readSoilSensor(soilSensors[1].sensor, soilSensors[1].power, soil2);
       delay(200);
-      int soil3SensorStatus = readSoilSensor(soilSensor3, soil3);
+      int soil3SensorStatus = readSoilSensor(soilSensors[2].sensor, soilSensors[2].power, soil3);
 
       // calc overall sensor status
       currentSensorStatus = (bmeSensorStatus << 6) + (soil1SensorStatus << 4) +
@@ -103,15 +102,15 @@ void loop() {
     lastSensorStatus = currentSensorStatus;
 }
 
-int postToParticle() {
+// post to Particle cloud
+void postToParticle() {
   sprintf(publishString,"{\"status\": %d, \"temp\": %0.2f, \"pressure\": %0.2f, \"humidity\": %0.2f, \"soil1\": %u, \"soil2\": %u, \"soil3\": %u}",
     currentSensorStatus, temperature, pressure, humidity, soil1, soil2, soil3);
   Particle.publish("sensor",publishString);
-  return 1;
 }
 
+// post to SparkFun phant cloud storage
 int postToPhant() {
-  // add variables
   phant.add("status", currentSensorStatus);
   phant.add("temp", temperature, 2);
   phant.add("pressure", pressure, 2);
@@ -147,12 +146,12 @@ int readBMESensor() {
 }
 
 // read soil sensor data
-int readSoilSensor(int soilSensor, int &soilValue) {
+int readSoilSensor(const int soilSensor, const int soilSensorPower, int &soilValue) {
     digitalWrite(led, HIGH);
-    digitalWrite(soilPower, HIGH); //turn sensor power on
+    digitalWrite(soilSensorPower, HIGH); //turn sensor power on
     delay(10); // give some time to settle
     soilValue = analogRead(soilSensor);
-    digitalWrite(soilPower, LOW); //turn sensor power off
+    digitalWrite(soilSensorPower, LOW); //turn sensor power off
     delay(190);
     digitalWrite(led, LOW);
 
