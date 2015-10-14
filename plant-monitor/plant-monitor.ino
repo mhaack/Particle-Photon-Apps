@@ -11,6 +11,7 @@ const int led = D7;
 // main status
 int lastSensorStatus = 0, currentSensorStatus = 0;
 char publishString[128];
+char eventString[10];
 
 // BME280 sensor
 Adafruit_BME280 bme;
@@ -18,10 +19,11 @@ double temperature = 0;
 double pressure = 0;
 double altitude = 0;
 double humidity = 0;
+const double TEMPERATURE_THRESHOLD_LOW = 0; // used for alerts if temp is blow this value
 
 // moisture sensor
-const int soildThresholdLow = 500;
-const int soildThresholdHigh = 3500;
+const int SOIL_THRESHOLD_LOW = 500;
+const int SOIL_THRESHOLD_HIGH = 3500;
 struct SoilSensor {
   int sensor;
   int power;
@@ -37,12 +39,16 @@ Phant phant(server, publicKey, privateKey);
 
 // interval counters for measurement and post
 const unsigned int MEASUREMENT_RATE = 60000; // read sensor data every 60 sec
-const unsigned int POST_RATE = 15 * 60000; // post data every 15 minutes
+const unsigned int POST_RATE = 60 * 60000; // post data every 60 minutes
 elapsedMillis lastMeasurement;
 elapsedMillis lastPost;
 
+const unsigned int PUBLISHEVENT_TIME_HOUR = 15; // send events ~ 3pm
+boolean publishEvents = true;
+
 void setup() {
   Serial.begin(9600);
+  Time.zone(1);
 
   pinMode(led, OUTPUT);
   for (unsigned int i = 0; i < sizeof(soilSensors); i++) {
@@ -83,11 +89,21 @@ void loop() {
           lastMeasurement = 0;
           postToParticle();
           dumpSerial();
+
+          // send events to particle cloud used to trigger IFTTT push notification
+          if (Time.hour() == PUBLISHEVENT_TIME_HOUR && publishEvents == true) {
+            postSoilEventToParticle();
+            publishEvents = false;
+          }
+          if (Time.hour() > PUBLISHEVENT_TIME_HOUR) {
+            publishEvents = true;
+          }
       }
     }
 
     // update cloud on timer or sensor data changes
     if (lastPost > POST_RATE || currentSensorStatus != lastSensorStatus) {
+      postBMEEventToParticle();
       while (postToPhant() <= 0) { // publish to phant
         Serial.println("Phant post failed. Trying again.");
 				// Delay 1s, so we don't flood the server. Little delay's allow the Photon time
@@ -107,6 +123,26 @@ void postToParticle() {
   sprintf(publishString,"{\"status\": %d, \"temp\": %0.2f, \"pressure\": %0.2f, \"humidity\": %0.2f, \"soil1\": %u, \"soil2\": %u, \"soil3\": %u}",
     currentSensorStatus, temperature, pressure, humidity, soil1, soil2, soil3);
   Particle.publish("sensor",publishString);
+}
+
+// post to Particle cloud
+void postSoilEventToParticle() {
+  if (soil1 < SOIL_THRESHOLD_LOW) {
+    Particle.publish("plant_alert", "1");
+  }
+  if (soil2 < SOIL_THRESHOLD_LOW) {
+    Particle.publish("plant_alert", "2");
+  }
+  if (soil3 < SOIL_THRESHOLD_LOW) {
+    Particle.publish("plant_alert", "3");
+  }
+}
+
+void postBMEEventToParticle() {
+  if (temperature < TEMPERATURE_THRESHOLD_LOW) {
+    sprintf(eventString, "%0.2f °C", temperature);
+    Particle.publish("temp_alert", eventString);
+  }
 }
 
 // post to SparkFun phant cloud storage
@@ -155,9 +191,9 @@ int readSoilSensor(const int soilSensor, const int soilSensorPower, int &soilVal
     delay(190);
     digitalWrite(led, LOW);
 
-    if (soilValue < soildThresholdLow) {
+    if (soilValue < SOIL_THRESHOLD_LOW) {
       return 1; // indicate soil is to low
-    } else if (soilValue > soildThresholdHigh) {
+    } else if (soilValue > SOIL_THRESHOLD_HIGH) {
       return 2; // indicate soil is to high
     } else {
       return 0; // indicate normal reading
