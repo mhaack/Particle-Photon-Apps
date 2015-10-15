@@ -44,18 +44,20 @@ elapsedMillis lastMeasurement;
 elapsedMillis lastPost;
 
 const unsigned int PUBLISHEVENT_TIME_HOUR = 15; // send events ~ 3pm
-boolean publishEvents = true;
+boolean particleEventPublished = true;
 
 void setup() {
   Serial.begin(9600);
   Time.zone(1);
 
+  // declare GPIO pins
   pinMode(led, OUTPUT);
   for (unsigned int i = 0; i < sizeof(soilSensors); i++) {
     pinMode(soilSensors[i].sensor, INPUT);
     pinMode(soilSensors[i].power, OUTPUT);
   }
 
+  // init BME280 sensor
   if (!bme.begin()) {
     Serial.println("Could not find a valid BME280 sensor, check wiring!");
     while (1);
@@ -68,6 +70,7 @@ void setup() {
   Particle.variable("soil1", &soil1, INT);
   Particle.variable("soil2", &soil2, INT);
   Particle.variable("soil3", &soil3, INT);
+  Particle.variable("status", &currentSensorStatus, INT);
 }
 
 void loop() {
@@ -91,12 +94,12 @@ void loop() {
           dumpSerial();
 
           // send events to particle cloud used to trigger IFTTT push notification
-          if (Time.hour() == PUBLISHEVENT_TIME_HOUR && publishEvents == true) {
+          if (Time.hour() == PUBLISHEVENT_TIME_HOUR && particleEventPublished == true) {
             postSoilEventToParticle();
-            publishEvents = false;
+            particleEventPublished = false; // only publish once
           }
           if (Time.hour() > PUBLISHEVENT_TIME_HOUR) {
-            publishEvents = true;
+            particleEventPublished = true; // reset publish status
           }
       }
     }
@@ -176,9 +179,8 @@ int readBMESensor() {
     return 1; // indicate temp increase above threshold
   } else if (tempDiff < 0){
     return 2; // indicate temp decrease above threshold
-  } else {
-    return 0; // indicate normal reading
   }
+  return 0; // indicate normal reading
 }
 
 // read soil sensor data
@@ -195,10 +197,8 @@ int readSoilSensor(const int soilSensor, const int soilSensorPower, int &soilVal
       return 1; // indicate soil is to low
     } else if (soilValue > SOIL_THRESHOLD_HIGH) {
       return 2; // indicate soil is to high
-    } else {
-      return 0; // indicate normal reading
     }
-    return 0;
+    return 0; // indicate normal reading
 }
 
 void dumpSerial() {
